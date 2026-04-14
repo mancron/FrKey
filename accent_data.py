@@ -36,3 +36,9 @@ ACCENT_MAP: dict[str, list[str]] = {
 }
 
 TARGET_CHARS: frozenset[str] = frozenset(ACCENT_MAP.keys())
+
+REVERSE_MAP: dict[str, tuple[str, list[str]]] = {
+    variant: (base, ACCENT_MAP[base])
+    for base, variants in ACCENT_MAP.items()
+    for variant in variants
+}
