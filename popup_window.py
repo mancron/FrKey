@@ -5,6 +5,8 @@ from PyQt6.QtWidgets import QWidget, QHBoxLayout, QPushButton, QLabel
 from PyQt6.QtCore    import Qt, pyqtSignal
 from PyQt6.QtGui     import QCursor
 
+from style_dialog import DEFAULT_STYLE, _hex_with_opacity
+
 GWL_EXSTYLE      = -20
 WS_EX_NOACTIVATE = 0x08000000
 WS_EX_TOOLWINDOW = 0x00000080
@@ -15,6 +17,7 @@ class PopupWindow(QWidget):
 
     def __init__(self) -> None:
         super().__init__()
+        self._style = dict(DEFAULT_STYLE)
         self._setup_window_flags()
         self._setup_ui()
         self._apply_no_activate()
@@ -30,56 +33,69 @@ class PopupWindow(QWidget):
         self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
 
     def _setup_ui(self) -> None:
-        # 레이아웃은 self에 딱 하나만
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(10, 7, 10, 7)
-        layout.setSpacing(5)
-
+        self._layout = QHBoxLayout(self)
+        self._layout.setContentsMargins(10, 7, 10, 7)
+        self._layout.setSpacing(4)
         self.setObjectName("popup_root")
-        self.setStyleSheet("""
-            QWidget#popup_root {
-                background-color: rgba(24, 24, 28, 230);
-                border-radius: 10px;
-                border: 1px solid rgba(255, 255, 255, 0.12);
-            }
-            QPushButton {
-                background-color: rgba(255, 255, 255, 0.07);
-                color: #F0F0F0;
-                border: 1px solid rgba(255, 255, 255, 0.18);
-                border-radius: 6px;
-                padding: 5px 12px;
-                font-size: 17px;
-                font-family: 'Segoe UI', 'Arial Unicode MS', sans-serif;
-                min-width: 36px;
-            }
-            QPushButton:hover {
-                background-color: rgba(100, 140, 255, 0.45);
-                border-color: rgba(120, 160, 255, 0.7);
-                color: #FFFFFF;
-            }
-            QPushButton:pressed {
-                background-color: rgba(80, 120, 220, 0.6);
-            }
-            QLabel {
-                color: rgba(255, 255, 255, 0.35);
-                font-size: 11px;
-                font-family: 'Segoe UI', sans-serif;
-                background: transparent;
-                border: none;
-                padding-left: 4px;
-            }
-        """)
 
         self._buttons: list[QPushButton] = []
         for i in range(9):
             btn = QPushButton()
             btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
             btn.clicked.connect(lambda _, idx=i: self.selection_made.emit(idx))
-            layout.addWidget(btn)
+            self._layout.addWidget(btn)
             self._buttons.append(btn)
 
         self._hint = QLabel("ESC")
-        layout.addWidget(self._hint)
+        self._layout.addWidget(self._hint)
+
+        self._apply_style()
+
+    def _apply_style(self) -> None:
+        s       = self._style
+        opacity = s.get("opacity", 235)
+        bg      = _hex_with_opacity(s.get("bg_color",     "#18181c"), opacity)
+        btn_bg  = s.get("btn_color",    "#ffffff12")
+        text    = s.get("text_color",   "#f0f0f0")
+        border  = s.get("border_color", "#ffffff1e")
+
+        self.setStyleSheet(f"""
+            QWidget#popup_root {{
+                background-color: {bg};
+                border-radius: 10px;
+                border: 1px solid {border};
+            }}
+            QPushButton {{
+                background-color: {btn_bg};
+                color: {text};
+                border: 1px solid {border};
+                border-radius: 6px;
+                padding: 4px 10px;
+                font-size: 16px;
+                font-family: 'Segoe UI', 'Arial Unicode MS', sans-serif;
+                min-width: 34px;
+            }}
+            QPushButton:hover {{
+                background-color: rgba(100,140,255,0.45);
+                border-color: rgba(120,160,255,0.7);
+                color: #ffffff;
+            }}
+            QPushButton:pressed {{
+                background-color: rgba(80,120,220,0.6);
+            }}
+            QLabel {{
+                color: {text};
+                font-size: 10px;
+                background: transparent;
+                border: none;
+                padding-left: 2px;
+            }}
+        """)
+
+    def apply_popup_style(self, style: dict) -> None:
+        """외부에서 실시간으로 스타일 업데이트 (미리보기용)."""
+        self._style = style
+        self._apply_style()
 
     def _apply_no_activate(self) -> None:
         self.show()
@@ -91,27 +107,31 @@ class PopupWindow(QWidget):
             current | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW
         )
 
-    def show_popup(self, char: str, options: list[str]) -> None:
+    def show_popup(self, char: str, options: list[str], caret_x: int, caret_y: int) -> None:
         for i, btn in enumerate(self._buttons):
             if i < len(options):
-                btn.setText(f"{i + 1}.{options[i]}")
+                btn.setText(f"{i+1}.{options[i]}")
                 btn.setVisible(True)
             else:
                 btn.setVisible(False)
 
         self.adjustSize()
-
-        pos    = QCursor.pos()
         screen = self.screen().availableGeometry()
-        x = pos.x() + 12
-        y = pos.y() - self.height() - 14
 
-        if x + self.width() > screen.right():
-            x = pos.x() - self.width() - 12
-        if y < screen.top():
-            y = pos.y() + 20
-        if x < screen.left():
-            x = screen.left() + 8
+        if caret_x >= 0 and caret_y >= 0:
+            # 네이티브 앱: 캐럿(텍스트 커서) 바로 아래
+            x, y = caret_x, caret_y + 4
+        else:
+            # Electron 등 폴백: 마우스 커서 바로 위
+            # (타이핑 중 마우스는 텍스트 근처에 있으므로 위쪽이 자연스러움)
+            pos  = QCursor.pos()
+            x    = pos.x() - self.width() // 2   # 마우스 중앙 기준 수평 정렬
+            y    = pos.y() - self.height() - 12  # 마우스 위쪽
+
+        if x + self.width()  > screen.right():  x = screen.right()  - self.width()  - 4
+        if y + self.height() > screen.bottom(): y = (caret_y - self.height() - 4) if caret_y >= 0 else y - self.height() - 20
+        if x < screen.left():  x = screen.left()  + 4
+        if y < screen.top():   y = screen.top()   + 4
 
         self.move(x, y)
         self.show()

@@ -5,6 +5,7 @@ import threading
 import time
 from PyQt6.QtCore import QObject, pyqtSignal
 
+from caret_pos    import get_caret_screen_pos
 from accent_data  import ACCENT_MAP, TARGET_CHARS, REVERSE_MAP
 from input_sender import (
     OUR_EXTRA_INFO,
@@ -27,8 +28,6 @@ user32.CallNextHookEx.argtypes = [
     ctypes.wintypes.HHOOK, ctypes.c_int, WPARAM_T, LPARAM_T,
 ]
 user32.UnhookWindowsHookEx.restype = ctypes.wintypes.BOOL
-user32.GetGUIThreadInfo.restype    = ctypes.wintypes.BOOL
-user32.ClientToScreen.restype      = ctypes.wintypes.BOOL
 user32.GetKeyState.restype         = ctypes.c_short
 
 WH_KEYBOARD_LL = 13
@@ -72,35 +71,6 @@ class CWPSTRUCT(ctypes.Structure):
         ('message', ctypes.wintypes.UINT),
         ('hwnd',    ctypes.wintypes.HWND),
     ]
-
-
-class GUITHREADINFO(ctypes.Structure):
-    _fields_ = [
-        ('cbSize',        ctypes.wintypes.DWORD),
-        ('flags',         ctypes.wintypes.DWORD),
-        ('hwndActive',    ctypes.wintypes.HWND),
-        ('hwndFocus',     ctypes.wintypes.HWND),
-        ('hwndCapture',   ctypes.wintypes.HWND),
-        ('hwndMenuOwner', ctypes.wintypes.HWND),
-        ('hwndMoveSize',  ctypes.wintypes.HWND),
-        ('hwndCaret',     ctypes.wintypes.HWND),
-        ('rcCaret',       ctypes.wintypes.RECT),
-    ]
-
-
-def get_caret_screen_pos() -> tuple[int, int] | None:
-    info = GUITHREADINFO()
-    info.cbSize = ctypes.sizeof(GUITHREADINFO)
-    if not user32.GetGUIThreadInfo(0, ctypes.byref(info)):
-        return None
-    if not info.hwndCaret:
-        return None
-    pt = ctypes.wintypes.POINT()
-    pt.x = info.rcCaret.left
-    pt.y = info.rcCaret.bottom
-    if user32.ClientToScreen(info.hwndCaret, ctypes.byref(pt)):
-        return pt.x, pt.y
-    return None
 
 
 class HookManager(QObject):

@@ -9,6 +9,7 @@ import settings_storage
 from setup_wizard  import SetupWizard
 from popup_window  import PopupWindow
 from hook_manager  import HookManager
+from style_dialog  import StyleDialog, DEFAULT_STYLE
 
 
 def _make_tray_icon() -> QIcon:
@@ -27,14 +28,16 @@ def _make_tray_icon() -> QIcon:
 
 
 def run_app(settings: dict) -> None:
-    """설정이 확정된 후 메인 앱 실행."""
     app = QApplication.instance()
 
     popup        = PopupWindow()
     hook_manager = HookManager(popup, settings)
 
-    # 트레이 메뉴
-    tray = QSystemTrayIcon(_make_tray_icon(), parent=app)
+    # 저장된 팝업 스타일 즉시 적용
+    saved_style = settings.get("popup_style", DEFAULT_STYLE)
+    popup.apply_popup_style(saved_style)
+
+    tray     = QSystemTrayIcon(_make_tray_icon(), parent=app)
     key_name = settings.get("trigger_label", "설정된 키")
     tray.setToolTip(f"Accent Input  |  트리거: {key_name}")
 
@@ -44,32 +47,40 @@ def run_app(settings: dict) -> None:
     info.setEnabled(False)
     menu.addSeparator()
 
-    config_action = menu.addAction("설정 (키 변경)")
+    style_action  = menu.addAction("팝업 스타일 설정")
+    config_action = menu.addAction("트리거 키 변경")
+    menu.addSeparator()
     quit_action   = menu.addAction("종료")
 
-    def open_settings():
+    # ── 스타일 설정 ─────────────────────────────────────────
+    def open_style():
+        current_cfg   = settings_storage.load() or {}
+        current_style = current_cfg.get("popup_style", DEFAULT_STYLE)
+        dlg = StyleDialog(current_style)
+        # 실시간 미리보기: 다이얼로그에서 바꿀 때마다 실제 팝업에도 반영
+        dlg.style_changed.connect(popup.apply_popup_style)
+        if dlg.exec() == StyleDialog.DialogCode.Accepted:
+            popup.apply_popup_style(dlg.get_style())
+        else:
+            # 취소 시 원래 스타일 복원
+            popup.apply_popup_style(current_style)
+
+    style_action.triggered.connect(open_style)
+
+    # ── 트리거 키 변경 ───────────────────────────────────────
+    def open_key_settings():
         hook_manager.stop()
         wiz = SetupWizard(is_reconfig=True)
         if wiz.exec() == SetupWizard.DialogCode.Accepted:
             new_settings = settings_storage.load()
             if new_settings:
-                # 새 설정으로 훅 재시작
                 hook_manager.update_settings(new_settings)
                 new_name = new_settings.get("trigger_label", "설정된 키")
                 tray.setToolTip(f"Accent Input  |  트리거: {new_name}")
                 info.setText(f"트리거 키: {new_name}")
-                hook_thread = threading.Thread(
-                    target=hook_manager.start, daemon=True, name="HookThread"
-                )
-                hook_thread.start()
-        else:
-            # 취소 시 기존 설정으로 재시작
-            hook_thread = threading.Thread(
-                target=hook_manager.start, daemon=True, name="HookThread"
-            )
-            hook_thread.start()
+        threading.Thread(target=hook_manager.start, daemon=True, name="HookThread").start()
 
-    config_action.triggered.connect(open_settings)
+    config_action.triggered.connect(open_key_settings)
     quit_action.triggered.connect(app.quit)
 
     tray.setContextMenu(menu)
@@ -81,11 +92,7 @@ def run_app(settings: dict) -> None:
         2500,
     )
 
-    # 훅 스레드 시작
-    hook_thread = threading.Thread(
-        target=hook_manager.start, daemon=True, name="HookThread"
-    )
-    hook_thread.start()
+    threading.Thread(target=hook_manager.start, daemon=True, name="HookThread").start()
     app.aboutToQuit.connect(hook_manager.stop)
 
 
@@ -96,10 +103,9 @@ def main() -> None:
     settings = settings_storage.load()
 
     if settings is None:
-        # ── 첫 실행: 마법사 표시 ──────────────────────────
         wiz = SetupWizard()
         if wiz.exec() != SetupWizard.DialogCode.Accepted:
-            sys.exit(0)   # 마법사 취소 시 종료
+            sys.exit(0)
         settings = settings_storage.load()
         if not settings:
             sys.exit(0)
